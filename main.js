@@ -111,44 +111,42 @@
     throw lastErr || new Error("Falha ao carregar tradicional");
   }
 
-  // ===== Atual (Calendário Romano) via CalAPI =====
-  async function loadCurrent(){
-    // ATENÇÃO: é HTTP, então sempre via proxy
-    const apiHttp = "http://calapi.inadiutorium.cz/api/v0/en/calendars/default/today";
-    $("curLink").href = apiHttp;
+ // ===== Atual (Calendário Romano) via CalAPI =====
+async function loadCurrent(){
+  // ATENÇÃO: é HTTP, então sempre via proxy
+  const apiHttp = "http://calapi.inadiutorium.cz/api/v0/en/calendars/default/today";
+  $("curLink").href = apiHttp;
 
-    const data = await fetchJsonViaProxies(apiHttp);
+  const data = await fetchJsonViaProxies(apiHttp);
 
-    const c = Array.isArray(data.celebrations) ? data.celebrations : [];
-    const title = c.length ? c[0].title : "Celebração do dia";
+  const celebrations = Array.isArray(data.celebrations) ? data.celebrations : [];
 
-    $("curSaint").classList.remove("loading");
-    $("curSaint").textContent = title;
-  }
+  // Heurística: preferir “Santo” quando houver; senão, cai na celebração do dia.
+  const isLikelySaint = (title) => {
+    if (!title) return false;
+    const s = title.toLowerCase();
 
-  async function main(){
-    // Se o JS rodar, isso SOME do “—” imediatamente
-    const now = new Date();
-    $("datePill").textContent = formatDatePtBR(now);
+    // marcadores fortes de santo
+    if (s.includes("saint") || s.startsWith("st.") || s.includes("blessed")) return true;
 
-    // placeholders
-    $("tradSaint").textContent = "Carregando…";
-    $("curSaint").textContent = "Carregando…";
-    $("tradErr").style.display = "none";
-    $("curErr").style.display = "none";
+    // itens tipicamente “dia litúrgico”
+    const lit = [
+      "feria", "weekday", "sunday",
+      "advent", "lent", "easter", "christmas",
+      "ordinary time", "octave", "season"
+    ];
+    if (lit.some(k => s.includes(k))) return false;
 
-    try{
-      await loadTraditional(now);
-    } catch(e){
-      showError($("tradSaint"), $("tradErr"), `Erro (tradicional): ${e.message}`);
-    }
+    // se não parece “feria/tempo”, aceitamos como celebração de santo
+    return true;
+  };
 
-    try{
-      await loadCurrent();
-    } catch(e){
-      showError($("curSaint"), $("curErr"), `Erro (atual): ${e.message}`);
-    }
-  }
+  // 1) tenta achar um santo primeiro
+  const pickedSaint = celebrations.find(c => isLikelySaint(c.title));
 
-  main();
-})();
+  // 2) fallback: celebração principal do dia
+  const title = (pickedSaint && pickedSaint.title) || (celebrations[0]?.title) || "Celebração do dia";
+
+  $("curSaint").classList.remove("loading");
+  $("curSaint").textContent = title;
+}
