@@ -83,40 +83,50 @@
     $("tradSaint").textContent = title;
   }
 
-  // ========== (2) Atual (CalAPI) ==========
-  // Exemplo público: /api/v0/en/calendars/general-en/today 
-  // Vamos usar "default" e "today" pra simplificar.
-  async function loadCurrent(){
-    const apiUrl = "http://calapi.inadiutorium.cz/api/v0/en/calendars/default/today";
-    $("curLink").href = apiUrl;
+ // ========== (2) Atual (CalAPI) ==========
+async function loadCurrent(){
+  // CalAPI é HTTP, então precisamos de proxy HTTPS
+  const apiHttp = "http://calapi.inadiutorium.cz/api/v0/en/calendars/default/today";
+  $("curLink").href = apiHttp;
 
-    const data = await fetchJson(apiUrl);
+  const proxies = [
+    // Jina: retorna texto; precisamos extrair o JSON
+    `https://r.jina.ai/${apiHttp}`,
+    // AllOrigins: retorna o conteúdo bruto via HTTPS
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(apiHttp)}`
+  ];
 
-    // Estrutura típica: { date, season, celebrations: [{title, colour, rank, ...}, ...] }
-    const c = Array.isArray(data.celebrations) ? data.celebrations : [];
-    const title = c.length ? c[0].title : "Celebração do dia";
-
-    $("curSaint").classList.remove("loading");
-    $("curSaint").textContent = title;
+  function extractJsonFromText(text){
+    const start = text.indexOf("{");
+    const end = text.lastIndexOf("}");
+    if (start === -1 || end === -1 || end <= start) throw new Error("JSON não encontrado");
+    return JSON.parse(text.slice(start, end + 1));
   }
 
-  // ========== Boot ==========
-  async function main(){
-    const now = new Date();
-    $("datePill").textContent = formatDatePtBR(now);
+  let lastErr = null;
 
+  for (const url of proxies){
     try{
-      await loadTraditional(now);
-    }catch(e){
-      showError($("tradSaint"), $("tradErr"), `Erro ao buscar o calendário tradicional (${e.message}).`);
-    }
+      const raw = await fetchText(url);
 
-    try{
-      await loadCurrent();
-    }catch(e){
-      showError($("curSaint"), $("curErr"), `Erro ao buscar o calendário atual (${e.message}).`);
+      // Alguns proxys podem devolver JSON puro; outros devolvem “texto” contendo JSON.
+      let data;
+      try{
+        data = JSON.parse(raw);
+      } catch {
+        data = extractJsonFromText(raw);
+      }
+
+      const c = Array.isArray(data.celebrations) ? data.celebrations : [];
+      const title = c.length ? c[0].title : "Celebração do dia";
+
+      $("curSaint").classList.remove("loading");
+      $("curSaint").textContent = title;
+      return;
+    } catch(e){
+      lastErr = e;
     }
   }
 
-  main();
-})();
+  throw lastErr || new Error("Falha desconhecida");
+}
