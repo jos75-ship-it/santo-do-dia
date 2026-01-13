@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Santo do Dia</title>
+
+  <!-- Fontes (mesma vibe do widget anterior: serif + “display”) -->
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=EB+Garamond:ital,wght@0,400;0,600;1,400;1,600&display=swap" rel="stylesheet">
+
+  <style>
+    :root{
+      --ink: rgba(240, 236, 228, 0.92);
+      --muted: rgba(240, 236, 228, 0.65);
+      --gold: rgba(200, 174, 120, 0.92);
+      --line: rgba(240, 236, 228, 0.16);
+      --line-strong: rgba(240, 236, 228, 0.22);
+      --shadow: rgba(0,0,0,0.35);
+    }
+
+    /* TRANSPARÊNCIA total para “blend” no Notion */
+    html, body{
+      height: 100%;
+      background: transparent;
+      margin: 0;
+    }
+
+    body{
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding: 16px;
+      color: var(--ink);
+      font-family: "EB Garamond", ui-serif, Georgia, serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    .card{
+      width: min(980px, 100%);
+      background: rgba(0,0,0,0);           /* transparente */
+      border: 1px solid var(--line-strong); /* moldura fina */
+      border-radius: 18px;
+      box-shadow: 0 18px 60px var(--shadow);
+      overflow:hidden;
+      backdrop-filter: blur(6px);           /* “vidro” sutil (fica lindo no dark) */
+    }
+
+    .header{
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .brand{
+      display:flex;
+      gap: 12px;
+      align-items:center;
+      min-width: 0;
+    }
+
+    .brand .cross{
+      color: var(--gold);
+      font-size: 18px;
+      transform: translateY(-1px);
+      text-shadow: 0 0 10px rgba(200,174,120,0.15);
+      user-select:none;
+    }
+
+    .brand h1{
+      margin:0;
+      font-family: "Cinzel", ui-serif, serif;
+      letter-spacing: 0.08em;
+      font-weight: 700;
+      font-size: 20px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .pill{
+      display:flex;
+      align-items:center;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 14px;
+      border: 1px solid var(--line);
+      padding: 8px 12px;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+
+    .body{
+      padding: 18px;
+    }
+
+    .section-title{
+      font-family: "Cinzel", ui-serif, serif;
+      color: var(--gold);
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      margin: 6px 0 10px;
+      font-size: 18px;
+    }
+
+    .grid{
+      display:grid;
+      gap: 12px;
+      grid-template-columns: 1fr;
+    }
+
+    @media (min-width: 760px){
+      .grid{
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    .panel{
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 14px 14px 12px;
+      background: rgba(0,0,0,0.12); /* sutil, ainda “blend” */
+    }
+
+    .panel h2{
+      margin: 0 0 10px;
+      font-size: 16px;
+      font-family: "Cinzel", ui-serif, serif;
+      letter-spacing: 0.04em;
+      color: rgba(240,236,228,0.86);
+      display:flex;
+      align-items:center;
+      gap:10px;
+    }
+
+    .panel h2 .ico{
+      color: var(--gold);
+      font-size: 16px;
+      user-select:none;
+      opacity: 0.9;
+    }
+
+    .saint{
+      font-size: 20px;
+      line-height: 1.25;
+      margin: 0;
+      color: var(--ink);
+      font-weight: 600;
+    }
+
+    .hint{
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    .footer{
+      display:flex;
+      justify-content:space-between;
+      gap: 12px;
+      padding: 12px 18px 16px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .footer a{
+      color: var(--gold);
+      text-decoration: none;
+      border-bottom: 1px dotted rgba(200,174,120,0.55);
+    }
+
+    .footer a:hover{
+      border-bottom-color: rgba(200,174,120,0.95);
+    }
+
+    .loading{
+      opacity: 0.8;
+      font-style: italic;
+    }
+
+    .error{
+      color: rgba(255, 210, 210, 0.9);
+      font-size: 14px;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+
+<body>
+  <main class="card" role="article" aria-label="Santo do dia (tradicional e atual)">
+    <header class="header">
+      <div class="brand">
+        <div class="cross">✝</div>
+        <h1>Santo do Dia</h1>
+      </div>
+      <div class="pill" id="datePill">—</div>
+    </header>
+
+    <section class="body">
+      <div class="section-title">Calendários</div>
+
+      <div class="grid">
+        <div class="panel">
+          <h2><span class="ico">⟡</span> Tradicional (1962)</h2>
+          <p class="saint loading" id="tradSaint">Carregando…</p>
+          <div class="error" id="tradErr" style="display:none;"></div>
+          <div class="hint">Base: Rubrics 1960 (harmonizado com a edição típica de 1962).</div>
+        </div>
+
+        <div class="panel">
+          <h2><span class="ico">✶</span> Atual (Calendário Romano)</h2>
+          <p class="saint loading" id="curSaint">Carregando…</p>
+          <div class="error" id="curErr" style="display:none;"></div>
+          <div class="hint">Se não houver “santo”, pode aparecer a celebração/feria do dia.</div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <div>
+        Fonte (trad.): <a href="#" id="tradLink" target="_blank" rel="noopener noreferrer">Divinum Officium</a>
+        &nbsp;•&nbsp;
+        Fonte (atual): <a href="#" id="curLink" target="_blank" rel="noopener noreferrer">CalAPI</a>
+      </div>
+      <div id="autoNote">Atualiza diariamente.</div>
+    </footer>
+  </main>
+
+  <script src="./main.js"></script>
+</body>
+</html>
