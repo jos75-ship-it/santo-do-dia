@@ -1,85 +1,128 @@
 (() => {
+  // =========================
+  // Santo do Dia — Tradicional (1962) + Atual (Calendário Romano)
+  // Robustez máxima p/ Notion embeds (CORS + Mixed Content + timeouts)
+  // =========================
+
   const $ = (id) => document.getElementById(id);
 
-  function pad2(n){ return String(n).padStart(2, "0"); }
+  // ---------- util ----------
+  const pad2 = (n) => String(n).padStart(2, "0");
 
-  function formatDatePtBR(d){
-    return d.toLocaleDateString("pt-BR", {
-      weekday: "long", year: "numeric", month: "long", day: "numeric"
-    });
+  function formatDatePtBR(d) {
+    try {
+      return d.toLocaleDateString("pt-BR", {
+        weekday: "long",
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      });
+    } catch {
+      return d.toLocaleDateString("pt-BR");
+    }
   }
 
-  // Proxies HTTPS (para páginas/HTTP e evitar CORS/mixed content)
-  const proxyJina = (url) => `https://r.jina.ai/${url.replace(/^http:\/\//i, "http://").replace(/^https:\/\//i, "https://")}`;
-  const proxyAllOrigins = (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+  function setText(id, text) {
+    const el = $(id);
+    if (el) el.textContent = text;
+  }
 
-  async function fetchWithTimeout(url, ms=9000){
+  function setLink(id, href) {
+    const el = $(id);
+    if (el) el.href = href;
+  }
+
+  function showError(textId, errId, msg) {
+    const textEl = $(textId);
+    const errEl = $(errId);
+    if (textEl) {
+      textEl.classList.remove("loading");
+      textEl.textContent = "Não foi possível carregar.";
+    }
+    if (errEl) {
+      errEl.style.display = "block";
+      errEl.textContent = msg;
+    }
+  }
+
+  // ---------- CORS / Mixed content helpers ----------
+  // IMPORTANT: calapi é http://, então SEMPRE via proxy https
+  const proxyAllOrigins = (url) =>
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+
+  const proxyJina = (url) => `https://r.jina.ai/${url}`;
+
+  async function fetchWithTimeout(url, ms = 12000) {
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), ms);
-    try{
+    try {
       const res = await fetch(url, { cache: "no-store", signal: controller.signal });
-      if(!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.text();
     } finally {
       clearTimeout(t);
     }
   }
 
-  async function fetchJsonViaProxies(httpOrHttpsUrl){
-    // tenta AllOrigins primeiro (geralmente mais “puro”), depois Jina
-    const tries = [proxyAllOrigins(httpOrHttpsUrl), proxyJina(httpOrHttpsUrl)];
+  async function fetchTextViaProxies(url, ms = 12000) {
+    const tries = [proxyAllOrigins(url), proxyJina(url)];
     let lastErr = null;
 
-    for (const u of tries){
-      try{
-        const raw = await fetchWithTimeout(u, 9000);
-
-        // pode vir JSON puro ou texto com JSON “no meio”
-        try{
-          return JSON.parse(raw);
-        } catch {
-          const start = raw.indexOf("{");
-          const end = raw.lastIndexOf("}");
-          if (start === -1 || end === -1 || end <= start) throw new Error("JSON não encontrado");
-          return JSON.parse(raw.slice(start, end + 1));
-        }
-      } catch(e){
+    for (const u of tries) {
+      try {
+        return await fetchWithTimeout(u, ms);
+      } catch (e) {
         lastErr = e;
       }
     }
-    throw lastErr || new Error("Falha ao obter JSON");
+    throw lastErr || new Error("Falha ao buscar via proxy");
   }
 
-  function showError(textEl, errEl, msg){
-    textEl.classList.remove("loading");
-    textEl.textContent = "Não foi possível carregar.";
-    errEl.style.display = "block";
-    errEl.textContent = msg;
+  function extractJsonFromPossiblyWrappedText(raw) {
+    // tenta JSON puro
+    try {
+      return JSON.parse(raw);
+    } catch {}
+
+    // tenta pegar o primeiro objeto {...}
+    const start = raw.indexOf("{");
+    const end = raw.lastIndexOf("}");
+    if (start === -1 || end === -1 || end <= start) {
+      throw new Error("JSON não encontrado");
+    }
+    return JSON.parse(raw.slice(start, end + 1));
   }
 
-  // ===== Tradicional (1962) via Divinum Officium =====
-  function extractTraditionalTitle(rawText){
-    // rawText aqui é texto “achatado” do proxy; escolhemos linha “festa do dia”
+  async function fetchJsonViaProxies(url, ms = 12000) {
+    const raw = await fetchTextViaProxies(url, ms);
+    return extractJsonFromPossiblyWrappedText(raw);
+  }
+
+  // ---------- (1) Tradicional 1962 via Divinum Officium ----------
+  function extractTraditionalTitle(rawText) {
     const lines = rawText
       .split("\n")
-      .map(s => s.trim())
+      .map((s) => s.trim())
       .filter(Boolean);
 
-    // Preferência: linha com "~" (muito típico)
-    let c = lines.find(l => l.includes("~") && l.length < 140);
+    // preferir linha com "~" (muito frequente no topo)
+    let c = lines.find((l) => l.includes("~") && l.length < 160);
     if (c) return c;
 
-    // fallback: linhas que pareçam “título de festa”
-    c = lines.find(l =>
-      /^(S\.|Ss\.|Sancti|Sanctae|Beatae|B\.|Dominica|Feria|Commemoratio)/i.test(l) &&
-      l.length < 160
+    // fallback: linhas típicas de título litúrgico
+    c = lines.find(
+      (l) =>
+        /^(S\.|Ss\.|Sancti|Sanctae|Beatae|B\.|Dominica|Feria|Commemoratio)/i.test(l) &&
+        l.length < 170
     );
     if (c) return c;
 
-    return lines.find(l => l.length > 8 && l.length < 120) || "Celebração do dia";
+    // fallback: primeira linha curta “decente”
+    c = lines.find((l) => l.length > 10 && l.length < 120);
+    return c || "Celebração do dia";
   }
 
-  async function loadTraditional(d){
+  async function loadTraditional(d) {
     const mm = pad2(d.getMonth() + 1);
     const dd = pad2(d.getDate());
     const yyyy = d.getFullYear();
@@ -89,64 +132,108 @@
       `?command=prayOmnes&date1=${mm}-${dd}-${yyyy}` +
       `&lang2=Portugues&version=Rubrics+1960+-+1960&votive=Hodie`;
 
-    $("tradLink").href = directUrl;
+    setLink("tradLink", directUrl);
 
-    // tenta dois proxys
-    const tries = [proxyAllOrigins(directUrl), proxyJina(directUrl)];
-    let lastErr = null;
+    const raw = await fetchTextViaProxies(directUrl, 15000);
+    const title = extractTraditionalTitle(raw);
 
-    for (const u of tries){
-      try{
-        const raw = await fetchWithTimeout(u, 12000);
-        const title = extractTraditionalTitle(raw);
-
-        $("tradSaint").classList.remove("loading");
-        $("tradSaint").textContent = title;
-        return;
-      } catch(e){
-        lastErr = e;
-      }
+    const el = $("tradSaint");
+    if (el) {
+      el.classList.remove("loading");
+      el.textContent = title;
     }
-
-    throw lastErr || new Error("Falha ao carregar tradicional");
   }
 
- // ===== Atual (Calendário Romano) via CalAPI =====
-async function loadCurrent(){
-  // ATENÇÃO: é HTTP, então sempre via proxy
-  const apiHttp = "http://calapi.inadiutorium.cz/api/v0/en/calendars/default/today";
-  $("curLink").href = apiHttp;
-
-  const data = await fetchJsonViaProxies(apiHttp);
-
-  const celebrations = Array.isArray(data.celebrations) ? data.celebrations : [];
-
-  // Heurística: preferir “Santo” quando houver; senão, cai na celebração do dia.
-  const isLikelySaint = (title) => {
+  // ---------- (2) Atual (Calendário Romano) via CalAPI ----------
+  function isLikelySaintTitle(title) {
     if (!title) return false;
     const s = title.toLowerCase();
 
-    // marcadores fortes de santo
+    // marcadores fortes (inglês)
     if (s.includes("saint") || s.startsWith("st.") || s.includes("blessed")) return true;
 
-    // itens tipicamente “dia litúrgico”
+    // termos comuns de “dia litúrgico”
     const lit = [
-      "feria", "weekday", "sunday",
-      "advent", "lent", "easter", "christmas",
-      "ordinary time", "octave", "season"
+      "feria",
+      "weekday",
+      "sunday",
+      "advent",
+      "lent",
+      "easter",
+      "christmas",
+      "ordinary time",
+      "octave",
+      "season",
     ];
-    if (lit.some(k => s.includes(k))) return false;
+    if (lit.some((k) => s.includes(k))) return false;
 
     // se não parece “feria/tempo”, aceitamos como celebração de santo
     return true;
-  };
+  }
 
-  // 1) tenta achar um santo primeiro
-  const pickedSaint = celebrations.find(c => isLikelySaint(c.title));
+  async function loadCurrent() {
+    const apiHttp = "http://calapi.inadiutorium.cz/api/v0/en/calendars/default/today";
+    setLink("curLink", apiHttp);
 
-  // 2) fallback: celebração principal do dia
-  const title = (pickedSaint && pickedSaint.title) || (celebrations[0]?.title) || "Celebração do dia";
+    // (HTTP) -> via proxy HTTPS
+    const data = await fetchJsonViaProxies(apiHttp, 12000);
 
-  $("curSaint").classList.remove("loading");
-  $("curSaint").textContent = title;
-}
+    const celebrations = Array.isArray(data.celebrations) ? data.celebrations : [];
+
+    // 1) tenta “santo” primeiro
+    const picked = celebrations.find((c) => isLikelySaintTitle(c?.title));
+
+    // 2) fallback: celebração principal do dia
+    const title =
+      (picked && picked.title) ||
+      (celebrations[0] && celebrations[0].title) ||
+      "Celebração do dia";
+
+    const el = $("curSaint");
+    if (el) {
+      el.classList.remove("loading");
+      el.textContent = title;
+    }
+  }
+
+  // ---------- Boot ----------
+  async function main() {
+    const now = new Date();
+
+    // Se isso não mudar, o JS não está rodando (caminho do main.js errado ou sem defer)
+    setText("datePill", formatDatePtBR(now));
+
+    // reset placeholders
+    const tradErr = $("tradErr");
+    const curErr = $("curErr");
+    if (tradErr) tradErr.style.display = "none";
+    if (curErr) curErr.style.display = "none";
+
+    setText("tradSaint", "Carregando…");
+    setText("curSaint", "Carregando…");
+
+    const tradSaint = $("tradSaint");
+    const curSaint = $("curSaint");
+    if (tradSaint) tradSaint.classList.add("loading");
+    if (curSaint) curSaint.classList.add("loading");
+
+    try {
+      await loadTraditional(now);
+    } catch (e) {
+      showError("tradSaint", "tradErr", `Erro (tradicional): ${e?.message || e}`);
+    }
+
+    try {
+      await loadCurrent();
+    } catch (e) {
+      showError("curSaint", "curErr", `Erro (atual): ${e?.message || e}`);
+    }
+  }
+
+  // rodar quando o DOM estiver pronto (extra seguro em embeds)
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", main);
+  } else {
+    main();
+  }
+})();
