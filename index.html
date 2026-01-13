@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Santo do Dia</title>
 
-  <!-- Fontes (mesma vibe do widget anterior: serif + “display”) -->
+  <!-- Mesmas fontes/vibe do padrão -->
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=EB+Garamond:ital,wght@0,400;0,600;1,400;1,600&display=swap" rel="stylesheet">
 
@@ -16,7 +16,6 @@
       --gold: rgba(200, 174, 120, 0.92);
       --line: rgba(240, 236, 228, 0.16);
       --line-strong: rgba(240, 236, 228, 0.22);
-      --shadow: rgba(0,0,0,0.35);
     }
 
     /* TRANSPARÊNCIA total para “blend” no Notion */
@@ -39,12 +38,12 @@
 
     .card{
       width: min(980px, 100%);
-      background: rgba(0,0,0,0);           /* transparente */
-      border: 1px solid var(--line-strong); /* moldura fina */
+      background: rgba(0,0,0,0);              /* transparente */
+      border: 1px solid var(--line-strong);   /* moldura fina */
       border-radius: 18px;
-      box-shadow: 0 18px 60px var(--shadow);
+      box-shadow: none;                       /* ✅ SEM SOMBRA (pedido) */
       overflow:hidden;
-      backdrop-filter: blur(6px);           /* “vidro” sutil (fica lindo no dark) */
+      backdrop-filter: blur(6px);             /* “vidro” sutil */
     }
 
     .header{
@@ -53,6 +52,8 @@
       justify-content:space-between;
       padding: 16px 18px;
       border-bottom: 1px solid var(--line);
+      gap: 12px;
+      flex-wrap: wrap;
     }
 
     .brand{
@@ -66,7 +67,6 @@
       color: var(--gold);
       font-size: 18px;
       transform: translateY(-1px);
-      text-shadow: 0 0 10px rgba(200,174,120,0.15);
       user-select:none;
     }
 
@@ -122,7 +122,7 @@
       border: 1px solid var(--line);
       border-radius: 16px;
       padding: 14px 14px 12px;
-      background: rgba(0,0,0,0.12); /* sutil, ainda “blend” */
+      background: rgba(0,0,0,0.12);
     }
 
     .panel h2{
@@ -166,6 +166,7 @@
       border-top: 1px solid var(--line);
       color: var(--muted);
       font-size: 13px;
+      flex-wrap: wrap;
     }
 
     .footer a{
@@ -231,6 +232,7 @@
     </footer>
   </main>
 
-  <script src="./main.js"></script>
+  <!-- ✅ COM DEFER (para evitar “travado em Carregando…”) -->
+  <script src="./main.js" defer></script>
 </body>
 </html>
