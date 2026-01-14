@@ -1,7 +1,6 @@
 (() => {
   // =========================
-  // Santo do Dia — Tradicional (1962) + Atual (Calendário Romano)
-  // Robustez máxima p/ Notion embeds (CORS + Mixed Content + timeouts)
+  // Santo do Dia — Tradicional (1962) + Atual (Vatican News / pt)
   // =========================
 
   const $ = (id) => document.getElementById(id);
@@ -45,8 +44,7 @@
     }
   }
 
-  // ---------- CORS / Mixed content helpers ----------
-  // IMPORTANT: calapi é http://, então SEMPRE via proxy https
+  // ---------- CORS helpers ----------
   const proxyAllOrigins = (url) =>
     `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
 
@@ -67,7 +65,6 @@
   async function fetchTextViaProxies(url, ms = 12000) {
     const tries = [proxyAllOrigins(url), proxyJina(url)];
     let lastErr = null;
-
     for (const u of tries) {
       try {
         return await fetchWithTimeout(u, ms);
@@ -78,26 +75,6 @@
     throw lastErr || new Error("Falha ao buscar via proxy");
   }
 
-  function extractJsonFromPossiblyWrappedText(raw) {
-    // tenta JSON puro
-    try {
-      return JSON.parse(raw);
-    } catch {}
-
-    // tenta pegar o primeiro objeto {...}
-    const start = raw.indexOf("{");
-    const end = raw.lastIndexOf("}");
-    if (start === -1 || end === -1 || end <= start) {
-      throw new Error("JSON não encontrado");
-    }
-    return JSON.parse(raw.slice(start, end + 1));
-  }
-
-  async function fetchJsonViaProxies(url, ms = 12000) {
-    const raw = await fetchTextViaProxies(url, ms);
-    return extractJsonFromPossiblyWrappedText(raw);
-  }
-
   // ---------- (1) Tradicional 1962 via Divinum Officium ----------
   function extractTraditionalTitle(rawText) {
     const lines = rawText
@@ -105,11 +82,11 @@
       .map((s) => s.trim())
       .filter(Boolean);
 
-    // preferir linha com "~" (muito frequente no topo)
+    // preferir linha com "~"
     let c = lines.find((l) => l.includes("~") && l.length < 160);
     if (c) return c;
 
-    // fallback: linhas típicas de título litúrgico
+    // fallback: linhas típicas de título
     c = lines.find(
       (l) =>
         /^(S\.|Ss\.|Sancti|Sanctae|Beatae|B\.|Dominica|Feria|Commemoratio)/i.test(l) &&
@@ -117,7 +94,6 @@
     );
     if (c) return c;
 
-    // fallback: primeira linha curta “decente”
     c = lines.find((l) => l.length > 10 && l.length < 120);
     return c || "Celebração do dia";
   }
@@ -144,55 +120,95 @@
     }
   }
 
-  // ---------- (2) Atual (Calendário Romano) via CalAPI ----------
-  function isLikelySaintTitle(title) {
-    if (!title) return false;
-    const s = title.toLowerCase();
-
-    // marcadores fortes (inglês)
-    if (s.includes("saint") || s.startsWith("st.") || s.includes("blessed")) return true;
-
-    // termos comuns de “dia litúrgico”
-    const lit = [
-      "feria",
-      "weekday",
-      "sunday",
-      "advent",
-      "lent",
-      "easter",
-      "christmas",
-      "ordinary time",
-      "octave",
-      "season",
-    ];
-    if (lit.some((k) => s.includes(k))) return false;
-
-    // se não parece “feria/tempo”, aceitamos como celebração de santo
-    return true;
+  // ---------- (2) Atual via Vatican News (pt) ----------
+  function cleanTitle(s) {
+    if (!s) return "";
+    return s
+      .replace(/\s+/g, " ")
+      .replace(/\s*-\s*Vatican News\s*$/i, "")
+      .replace(/\s*\|\s*Vatican News\s*$/i, "")
+      .replace(/^\s*santo do dia\s*[-–—:]\s*/i, "")
+      .trim();
   }
 
-  async function loadCurrent() {
-    const apiHttp = "http://calapi.inadiutorium.cz/api/v0/en/calendars/default/today";
-    setLink("curLink", apiHttp);
+  function uniq(arr) {
+    const seen = new Set();
+    const out = [];
+    for (const x of arr) {
+      const k = x.toLowerCase();
+      if (!seen.has(k)) {
+        seen.add(k);
+        out.push(x);
+      }
+    }
+    return out;
+  }
 
-    // (HTTP) -> via proxy HTTPS
-    const data = await fetchJsonViaProxies(apiHttp, 12000);
+  function extractSaintNamesFromVaticanHTML(html) {
+    // Parse com DOMParser (mais estável que regex puro)
+    const doc = new DOMParser().parseFromString(html, "text/html");
 
-    const celebrations = Array.isArray(data.celebrations) ? data.celebrations : [];
+    // 1) Tenta pegar um título “oficial”
+    const og = doc.querySelector('meta[property="og:title"]')?.getAttribute("content");
+    const h1 = doc.querySelector("h1")?.textContent;
+    const titleTag = doc.querySelector("title")?.textContent;
 
-    // 1) tenta “santo” primeiro
-    const picked = celebrations.find((c) => isLikelySaintTitle(c?.title));
+    const baseTitle = cleanTitle((og || h1 || titleTag || "").trim());
 
-    // 2) fallback: celebração principal do dia
-    const title =
-      (picked && picked.title) ||
-      (celebrations[0] && celebrations[0].title) ||
-      "Celebração do dia";
+    // 2) Tenta pegar a lista de santos do corpo (quando houver múltiplos)
+    // Heurística: muitos sites colocam nomes em headings dentro do artigo.
+    const headings = Array.from(doc.querySelectorAll("main h2, main h3, article h2, article h3, .content h2, .content h3"))
+      .map(el => (el.textContent || "").replace(/\s+/g, " ").trim())
+      .filter(t => t && t.length < 140);
+
+    // Filtra headings “genéricos”
+    const bad = new Set([
+      "santo do dia",
+      "santos do dia",
+      "santo do dia - vatican news",
+      "santo do dia – vatican news",
+      "santo do dia — vatican news",
+      "santo do dia:",
+    ]);
+
+    const likelyNames = headings.filter(t => {
+      const low = t.toLowerCase();
+      if (bad.has(low)) return false;
+
+      // sinais comuns em pt: São/Santa/Santo/Beato/Beata/Santos/Santas/SS./S.
+      if (/^(são|santa|santo|beato|beata|santos|santas|ss\.|s\.)\b/i.test(t)) return true;
+
+      // também aceita nomes que contenham "São"/"Santa" no meio
+      if (/\b(são|santa|santo|beato|beata)\b/i.test(t)) return true;
+
+      return false;
+    });
+
+    const names = uniq(likelyNames);
+
+    // 3) Se não achou nada no corpo, cai no título da página
+    if (names.length === 0) {
+      return baseTitle || "Santo do dia";
+    }
+
+    // Se vier uma lista longa, juntamos com • (fica bonito no seu card)
+    return names.join(" • ");
+  }
+
+  async function loadCurrent(d) {
+    const mm = pad2(d.getMonth() + 1);
+    const dd = pad2(d.getDate());
+
+    const url = `https://www.vaticannews.va/pt/santo-do-dia/${mm}/${dd}.html`;
+    setLink("curLink", url);
+
+    const html = await fetchTextViaProxies(url, 15000);
+    const saints = extractSaintNamesFromVaticanHTML(html);
 
     const el = $("curSaint");
     if (el) {
       el.classList.remove("loading");
-      el.textContent = title;
+      el.textContent = saints || "Santo do dia";
     }
   }
 
@@ -200,7 +216,7 @@
   async function main() {
     const now = new Date();
 
-    // Se isso não mudar, o JS não está rodando (caminho do main.js errado ou sem defer)
+    // Se isso não mudar, o JS não está rodando (caminho errado / sem defer)
     setText("datePill", formatDatePtBR(now));
 
     // reset placeholders
@@ -224,13 +240,12 @@
     }
 
     try {
-      await loadCurrent();
+      await loadCurrent(now);
     } catch (e) {
       showError("curSaint", "curErr", `Erro (atual): ${e?.message || e}`);
     }
   }
 
-  // rodar quando o DOM estiver pronto (extra seguro em embeds)
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", main);
   } else {
