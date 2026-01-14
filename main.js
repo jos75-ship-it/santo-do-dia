@@ -1,6 +1,7 @@
 (() => {
   // =========================
   // Santo do Dia — Tradicional (1962) + Atual (Vatican News / pt)
+  // Robusto para Notion embed (CORS, proxies, HTML ou texto "jina")
   // =========================
 
   const $ = (id) => document.getElementById(id);
@@ -44,10 +45,12 @@
     }
   }
 
-  // ---------- CORS helpers ----------
+  // ---------- proxies ----------
+  // AllOrigins tende a devolver HTML "de verdade" (bom p/ DOMParser)
   const proxyAllOrigins = (url) =>
     `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
 
+  // Jina devolve a página "achatada" em texto/markdown (bom p/ regex por "##")
   const proxyJina = (url) => `https://r.jina.ai/${url}`;
 
   async function fetchWithTimeout(url, ms = 12000) {
@@ -63,11 +66,17 @@
   }
 
   async function fetchTextViaProxies(url, ms = 12000) {
-    const tries = [proxyAllOrigins(url), proxyJina(url)];
+    // NOTE: ordem importa: tentamos HTML primeiro
+    const tries = [
+      { kind: "html", url: proxyAllOrigins(url) },
+      { kind: "text", url: proxyJina(url) },
+    ];
+
     let lastErr = null;
-    for (const u of tries) {
+    for (const t of tries) {
       try {
-        return await fetchWithTimeout(u, ms);
+        const raw = await fetchWithTimeout(t.url, ms);
+        return { raw, kind: t.kind };
       } catch (e) {
         lastErr = e;
       }
@@ -110,7 +119,7 @@
 
     setLink("tradLink", directUrl);
 
-    const raw = await fetchTextViaProxies(directUrl, 15000);
+    const { raw } = await fetchTextViaProxies(directUrl, 15000);
     const title = extractTraditionalTitle(raw);
 
     const el = $("tradSaint");
@@ -121,14 +130,8 @@
   }
 
   // ---------- (2) Atual via Vatican News (pt) ----------
-  function cleanTitle(s) {
-    if (!s) return "";
-    return s
-      .replace(/\s+/g, " ")
-      .replace(/\s*-\s*Vatican News\s*$/i, "")
-      .replace(/\s*\|\s*Vatican News\s*$/i, "")
-      .replace(/^\s*santo do dia\s*[-–—:]\s*/i, "")
-      .trim();
+  function normalizeSpaces(s) {
+    return (s || "").replace(/\s+/g, " ").trim();
   }
 
   function uniq(arr) {
@@ -144,55 +147,71 @@
     return out;
   }
 
-  function extractSaintNamesFromVaticanHTML(html) {
-    // Parse com DOMParser (mais estável que regex puro)
+  function looksLikeSaintName(t) {
+    const s = t.toLowerCase();
+    // Vatican usa muito "S." / "Ss." (latinizante), e também pode aparecer "São/Santa"
+    return (
+      /^(s\.|ss\.)\s*/i.test(t) ||
+      /^(são|santa|santo|beato|beata|santos|santas)\b/i.test(t) ||
+      s.includes(" presbítero") ||
+      s.includes(" bispo") ||
+      s.includes(" mártir") ||
+      s.includes(" virgem") ||
+      s.includes(" abade") ||
+      s.includes(" diácono")
+    );
+  }
+
+  function extractFromHTML(html) {
     const doc = new DOMParser().parseFromString(html, "text/html");
 
-    // 1) Tenta pegar um título “oficial”
-    const og = doc.querySelector('meta[property="og:title"]')?.getAttribute("content");
-    const h1 = doc.querySelector("h1")?.textContent;
-    const titleTag = doc.querySelector("title")?.textContent;
+    // Na página real, o santo aparece como "##  S. Félix de Nola, presbítero" (heading) :contentReference[oaicite:1]{index=1}
+    // Vamos capturar H2/H3 dentro da área principal.
+    const candidates = Array.from(
+      doc.querySelectorAll("main h2, main h3, article h2, article h3")
+    )
+      .map((el) => normalizeSpaces(el.textContent))
+      .filter((t) => t && t.length < 160)
+      .filter(looksLikeSaintName);
 
-    const baseTitle = cleanTitle((og || h1 || titleTag || "").trim());
+    const names = uniq(candidates);
 
-    // 2) Tenta pegar a lista de santos do corpo (quando houver múltiplos)
-    // Heurística: muitos sites colocam nomes em headings dentro do artigo.
-    const headings = Array.from(doc.querySelectorAll("main h2, main h3, article h2, article h3, .content h2, .content h3"))
-      .map(el => (el.textContent || "").replace(/\s+/g, " ").trim())
-      .filter(t => t && t.length < 140);
+    if (names.length) return names.join(" • ");
 
-    // Filtra headings “genéricos”
-    const bad = new Set([
-      "santo do dia",
-      "santos do dia",
-      "santo do dia - vatican news",
-      "santo do dia – vatican news",
-      "santo do dia — vatican news",
-      "santo do dia:",
-    ]);
+    // fallback (raro): tentar pegar o primeiro heading "Santo do dia" e o próximo
+    const allH = Array.from(doc.querySelectorAll("h1,h2,h3"))
+      .map((el) => normalizeSpaces(el.textContent))
+      .filter(Boolean);
 
-    const likelyNames = headings.filter(t => {
-      const low = t.toLowerCase();
-      if (bad.has(low)) return false;
+    const idx = allH.findIndex((t) => t.toLowerCase() === "santo do dia");
+    if (idx >= 0 && allH[idx + 1]) return allH[idx + 1];
 
-      // sinais comuns em pt: São/Santa/Santo/Beato/Beata/Santos/Santas/SS./S.
-      if (/^(são|santa|santo|beato|beata|santos|santas|ss\.|s\.)\b/i.test(t)) return true;
+    return "";
+  }
 
-      // também aceita nomes que contenham "São"/"Santa" no meio
-      if (/\b(são|santa|santo|beato|beata)\b/i.test(t)) return true;
+  function extractFromJinaText(text) {
+    // Jina retorna linhas markdown com "#  Santo do dia" e depois "##  S. ..." :contentReference[oaicite:2]{index=2}
+    const lines = text
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean);
 
-      return false;
-    });
+    // acha o bloco do "Santo do dia"
+    const i = lines.findIndex((l) => /^#\s+Santo do dia$/i.test(l));
+    const slice = i >= 0 ? lines.slice(i, i + 80) : lines;
 
-    const names = uniq(likelyNames);
-
-    // 3) Se não achou nada no corpo, cai no título da página
-    if (names.length === 0) {
-      return baseTitle || "Santo do dia";
+    // pega todos "## ..." que pareçam santo
+    const saints = [];
+    for (const l of slice) {
+      const m = l.match(/^##\s+(.*)$/);
+      if (m) {
+        const cand = normalizeSpaces(m[1]);
+        if (cand && cand.length < 160 && looksLikeSaintName(cand)) saints.push(cand);
+      }
     }
 
-    // Se vier uma lista longa, juntamos com • (fica bonito no seu card)
-    return names.join(" • ");
+    const names = uniq(saints);
+    return names.length ? names.join(" • ") : "";
   }
 
   async function loadCurrent(d) {
@@ -202,13 +221,20 @@
     const url = `https://www.vaticannews.va/pt/santo-do-dia/${mm}/${dd}.html`;
     setLink("curLink", url);
 
-    const html = await fetchTextViaProxies(url, 15000);
-    const saints = extractSaintNamesFromVaticanHTML(html);
+    const { raw, kind } = await fetchTextViaProxies(url, 15000);
+
+    let saints = "";
+    if (kind === "html") saints = extractFromHTML(raw);
+    if (!saints) saints = extractFromJinaText(raw); // fallback universal
+    if (!saints) {
+      // último fallback: algo legível (sem “título da página” genérico)
+      saints = "Santo do dia";
+    }
 
     const el = $("curSaint");
     if (el) {
       el.classList.remove("loading");
-      el.textContent = saints || "Santo do dia";
+      el.textContent = saints;
     }
   }
 
@@ -216,10 +242,8 @@
   async function main() {
     const now = new Date();
 
-    // Se isso não mudar, o JS não está rodando (caminho errado / sem defer)
     setText("datePill", formatDatePtBR(now));
 
-    // reset placeholders
     const tradErr = $("tradErr");
     const curErr = $("curErr");
     if (tradErr) tradErr.style.display = "none";
